@@ -71,5 +71,5 @@
 (defn -main [inpath outpath]
   (let [src (query-count inpath)]
     (?<- (hfs-textline outpath :sinkmode :replace)
-         [?counts] (src ?counts))))
+         [?f ?v ?counts] (src ?f ?v ?counts))))
    
