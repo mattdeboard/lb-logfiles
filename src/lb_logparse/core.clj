@@ -38,8 +38,15 @@
    (params s)
    ])
 
-(defn logdata [inpath]
+(defn logdata
+  "Query the source file located at `inpath` and 'destructure' each log line
+according to the regexes defined above via the `logl` mapop. This operation
+turns a log line into a k-tuple, where k is the number of regexes specified
+in `logl`."
+  [inpath]
   (let [src (hfs-textline inpath)
+        ;; Assign a name to each member of the tuple to which it can later
+        ;; be referenced.
         fields ["?remote-addr" "?timestamp" "?method" "?url" "?status"
                 "?resp-time" "?params"]]
     (<- fields (src ?c) (logl ?c :>> fields) (:distinct false))))
@@ -56,20 +63,35 @@
 (defmapcatop yieldv [v]
   (re-seq param-vals v))
 
-(defn query-count [inpath]
+(defn query-count
+  "Query the source file located at `inpath` and return a 4-tuple:
+ [timestamp, field, term, count]."
+  [inpath]
   (let [data (select-fields (logdata inpath)
                             ["?params" "?timestamp"])]
-    (<- [?a ?b ?ct]
+    (<- [?ts ?a ?b ?ct]
         (data ?param ?ts)
+        ;; Convert a collection that looks like [["country" "United States"]]
+        ;; ["country "United States"].
         (explode ?param :> ?key-out ?val)
+        ;; Convert URL encoding to normal ASCII, e.g. %28foo%29 => (foo)
         (url-decode ?key-out ?val :> ?valout)
+        ;; Filter out all parameters except 'q'
         (q-only ?key-out ?valout :> ?key-out ?val-out)
+        ;; Split up search terms somewhat imperfectly due to imperfect regex.
+        ;; The `param-vals` regex doesn't account for boolean clauses, e.g.
+        ;; might miss "India" in e.g. `country:\"United States\" OR "India"`.
         (yieldv ?val-out :> _ ?a ?b)
+        ;; Count the number of occurrences of the tuple
         (c/count ?ct)
+        ;; Don't drop duplicates.
         (:distinct false))))
 
-(defn -main [inpath outpath]
+(defn -main
+  "Execute the `query-count` query against the source file, and output the
+results to HDFS."
+  [inpath outpath]
   (let [src (query-count inpath)]
     (?<- (hfs-textline outpath :sinkmode :replace)
-         [?f ?v ?counts] (src ?f ?v ?counts))))
+         [?ts ?f ?v ?counts] (src ?ts ?f ?v ?counts))))
    
