@@ -11,17 +11,8 @@
   (for [l (line-seq (io/reader (io/as-file infile)))]
     (vec (cs/split l #"\t"))))
 
-(defn filemap
-  "Map the tuple of values returned by `vectorize` to the fields provided in
-`fields`. The k-tuple returned by `vectorize` requires k fields in the args.
-ex.: (filemap tmp :timestamp :field :term :count)"
-  [infile & fields]
-  (for [v (vectorize infile)]
-    (zipmap fields v)))
+(defn filemap [coll & fields] (for [v coll] (zipmap fields v)))
 
-(def jsonify (generate-string (filemap tmp :timestamp :field :term :count)))
-
-
-
-
+(def jsonify (generate-string (filemap (vectorize tmp)
+                                       :timestamp :field :term :count)))
 
