@@ -8,7 +8,7 @@
 
 (def sl "108.46.21.116, 10.183.252.24 - - [07/Dec/2012:23:05:26 -0500] \"GET /api/markup/1119/9780547148342/344/ HTTP/1.0\" 200 28 \"http://berkeley.courseload.com/\" \"Mozilla/5.0 (Windows NT 6.0) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.95 Safari/537.11\" \"sessionid=fac5789e1a12f61e7e638784e749809e; csrftoken=805618b2677eb232b6a7263cb0ed47c6\"")
 (def fp "/home/matt/lb-logfiles/resources/apachesample.log")
-(def remote-addr (re-pattern #"[0-9.]+, [0-9.]+"))
+(def remote-addr (re-pattern #"-+|[0-9.]+, [0-9.]+"))
 (def timestamp
   ;; Call (second (re-find timestamp <line>)) to get the timestamp.
   (re-pattern #"\[[0-9]{2}/[A-Za-z]{3}/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2} [+\-0-9]{4,5}\]"))
@@ -43,11 +43,29 @@
    ])
 
 (defmapop split-ips [urls]
-  (seq (clojure.string/split urls #", ")))
+  (let [pattern #", *"]
+    (if (re-find pattern urls)
+      (seq (clojure.string/split urls pattern))
+      (seq '("noip" "noip")))))
+
+(defmapop show-ips [ips] ips)
 
 (deffilterop is-pageread? [path]
   (let [ptn #"/api/log/pageread/[0-9]+/[-a-zA-Z0-9_]+/"]
     (re-find ptn path)))
+
+(deffilterop is-authentication? [path]
+  (let [ptn #"/api/login/.*/*"]
+    (re-find ptn path)))
+
+(deffilterop is-get? [method]
+  (= method "GET"))
+
+(deffilterop is-post? [method]
+  (= method "POST"))
+
+(deffilterop http-success? [status]
+  (= status "200"))
 
 (defmapop page-and-slug [path]
   (let [ptn #"/api/log/pageread/([0-9]+)/([-a-zA-Z0-9_]+)/"]
@@ -72,14 +90,25 @@ in `logl`."
 (defn page-visits
   [inpath]
   (let [src (logdata inpath)]
-    (?<- (lfs-textline "resources/what" :sinkmode :replace)
-         [?page ?slug ?a ?ct]
+    (?<- (lfs-textline "resources/page-visits" :sinkmode :replace)
+         [?ip-out ?page ?slug ?ct]
          (src ?remote-addr _ _ ?url _ _ _)
-         (split-ips ?remote-addr :> ?a _)
-         (is-pageread? ?url :> ?url)
+         (is-pageread? ?url)
+         (split-ips ?remote-addr :> ?clientip _)
          (page-and-slug ?url :> ?page ?slug)
          (c/count ?ct)
+         (show-ips ?clientip :> ?ip-out))))
+
+(defn authentication [inpath]
+  (let [src (logdata inpath)]
+    (?<- (lfs-textline "resources/authentication" :sinkmode :replace)
+         [?method ?remote-addr ?params ?timestamp ?ct]
+         (src ?remote-addr ?timestamp ?method ?url ?status _ ?params)
+         (is-authentication? ?url :> ?url)
+         (c/count ?ct)
          (:distinct false))))
+;;         (http-success? ?status :> ?status))))
+         
 
 (defmapcatop explode [l] l)
 
@@ -148,4 +177,4 @@ in `logl`."
 ;;   (let [src (query-count inpath)]
 ;;     (?<- (hfs-textline outpath :sinkmode :replace)
 ;;          [?ts ?f ?v ?counts] (src ?ts ?f ?v ?counts))))
-   
+
